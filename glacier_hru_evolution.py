@@ -14,8 +14,9 @@ J2K HYDROLOGICAL MODEL
 import os
 #from numba import jit
 #from osgeo import gdal, ogr
-import matplotlib.pyplot as plt
-import matplotlib.backends.backend_pdf
+import pandas as pd
+#import matplotlib.pyplot as plt
+#import matplotlib.backends.backend_pdf
 import numpy as np
 import copy
 from pathlib import Path
@@ -35,6 +36,7 @@ command = ["gdalbuildvrt","-te"]
 workspace = str(Path(os.getcwd())) + '\\'
 #root = str(workspace.parent) + '\\'
 hru_path = workspace + 'HRUs\\'
+hru_glacier_fractions_path = workspace + 'HRU_glacier_fractions\\'
 original_glacier_thickness_path = workspace + 'glacier_thickness\\original_glacier_thickness\\'
 aligned_glacier_thickness_path = workspace + 'glacier_thickness\\aligned_glacier_thickness\\'
 
@@ -57,21 +59,16 @@ HRUs = raster_HRU.ReadAsArray()
 raster_HRU_landuse = gdal.Open(hru_path + 'hru_landuse.tif', gdal.GA_ReadOnly) 
 landuse_HRU = raster_HRU_landuse.ReadAsArray()
 
-# We remove all ice from the land use file in order to apply our custom glacier data
-# Instead we apply rock
+# Land use #7 = ice
 HRU_ice_idx = np.where(landuse_HRU == 7)
 HRUs_ID_ice = np.unique(HRUs[HRU_ice_idx])
 
-HRU_glacier = {'ID':0, 'ice_fraction':[], 'years':[]}
-HRU_glacier_evolution = []
+raw_HRU_glacier_evolution = ['year']
 for HRU_ID in HRUs_ID_ice:
-    current_HRU = copy.deepcopy(HRU_glacier)
-    current_HRU['ID'] = HRU_ID
-    HRU_glacier_evolution.append(current_HRU)
-HRU_glacier_evolution = np.asarray(HRU_glacier_evolution)
+    raw_HRU_glacier_evolution.append(int(HRU_ID))
 
-#import pdb; pdb.set_trace()
-# Land use #7 = ice
+# Empty dataframe
+HRU_glacier_evolution_df = pd.DataFrame()
 
 # Iterate all years of glacier evolution data
 for path_glacier_thickness in list_path_glacier_thickness:
@@ -82,8 +79,6 @@ for path_glacier_thickness in list_path_glacier_thickness:
     glacier_ID = path_glacier_thickness[-14:-9]
     year = path_glacier_thickness[-8:-4]
     
-#    import pdb; pdb.set_trace()
-
     #### Open raster data ###
     adfGeoTransform = raster_HRU_landuse.GetGeoTransform(can_return_null = True)
     
@@ -96,34 +91,36 @@ for path_glacier_thickness in list_path_glacier_thickness:
         xres = str(abs(adfGeoTransform[1]))
         yres = str(abs(adfGeoTransform[5]))
         vrt_glacier_thick_path = aligned_glacier_thickness_path + "glacier_" + year + "_VRT.vrt"
-#        print("\nvrt_glacier_thick_path: " + str(vrt_glacier_thick_path))
         subprocess.call(command +[ str(dfGeoXUL), str(dfGeoYLR), str(dfGeoXLR), str(dfGeoYUL), "-tr", xres, yres, vrt_glacier_thick_path, full_path_glacier_thickness])
-#        os.system(command +[ str(dfGeoXUL), str(dfGeoYLR), str(dfGeoXLR), str(dfGeoYUL), "-tr", xres, yres, vrt_glacier_thick_path, full_path_glacier_thickness])
 
-        
     # We open the aligned VRT glacier ice thickness raster
     raster_current_glacier = gdal.Open(vrt_glacier_thick_path, gdal.GA_ReadOnly) 
     current_glacier_thickness = raster_current_glacier.ReadAsArray()
     
     ice_mask = np.where(current_glacier_thickness > 0)
+    current_year = [year]
     
     # We compute the glaciarized fraction for each HRU with ice
-    for HRU_ID, HRU_evolution in zip(HRUs_ID_ice, HRU_glacier_evolution):
+    for HRU_ID in HRUs_ID_ice:
 #        print("\nHRU ID: " + str(int(HRU_ID)))
         glacier_HRU_idx = np.where(HRUs == HRU_ID)
         current_thickness_HRU = current_glacier_thickness[glacier_HRU_idx]
         glacierized_perc_HRU = current_thickness_HRU[current_thickness_HRU > 0].size/HRUs[glacier_HRU_idx].size
         
-        # We store the processed information into the data structure
-        HRU_evolution['ice_fraction'].append(glacierized_perc_HRU)
-        HRU_evolution['years'].append(year)
+        # We create a new row to be stacked on the raw data
+        current_year.append(glacierized_perc_HRU)
     
+    # We add the row for the current year to the raw data
+    raw_HRU_glacier_evolution = np.vstack((raw_HRU_glacier_evolution, current_year))
 
-print("\nProcessed glacierized HRUs evolution: " + str(HRU_glacier_evolution))
-    
-    
-    
-    
+# We add the raw data into the dataframe
+HRU_evolution_df = pd.DataFrame(index= raw_HRU_glacier_evolution[1:,0], columns=raw_HRU_glacier_evolution[0,1:], data=raw_HRU_glacier_evolution[1:,1:])
+print("\nProcessed glacierized HRUs evolution dataframe: " + str(HRU_evolution_df))
+#import pdb; pdb.set_trace()
+ 
+# Save output in file to be read by J2K
+HRU_evolution_df.to_csv(hru_glacier_fractions_path + "HRU_glacier_fractions_" + str(HRU_evolution_df.index.min()) + "_" + str(HRU_evolution_df.index.max()) + '.dat', sep=' ', index_label = 'year')
+   
     
     
     
