@@ -16,6 +16,7 @@ import pandas as pd
 import subprocess
 import matplotlib.pyplot as plt
 import proplot as plot
+import copy
 
 # Paths
 
@@ -24,6 +25,7 @@ j2k_output_path = "C:\Jordi\PhD\Java\J2K\jamsmodeldata\Arvan_Amont_detaille_loc\
 plots_path = os.path.join(workspace, 'plots')
 j2k_updated_output_path = os.path.join(workspace, 'J2K_output')
 arvan_obs_path = "C:\Jordi\PhD\J2K\Data\Arvan"
+smb_path = os.path.join(arvan_obs_path, 'saint_sorlin')
 
 ###############################################################################
 ###                           FUNCTIONS                                     ###
@@ -43,41 +45,201 @@ raw_time_loop.to_csv(os.path.join(j2k_updated_output_path, "TimeLoop_clean.dat")
 
 # Parse cleaned up version
 time_loop = pd.read_csv(os.path.join(j2k_updated_output_path, "TimeLoop_clean.dat"), sep="\t", index_col=1, usecols=range(0,n_cols))
-time_loop.index =  pd.to_datetime(time_loop.index).date
+time_loop.index =  pd.to_datetime(time_loop.index, infer_datetime_format=True)
 #time_loop.index = time_loop.index.to_numpy()
 
 # Open and parse Arvan hydrological observations
 arvan_obs = pd.read_csv(os.path.join(arvan_obs_path, "W1055020_qj_hydro2.txt"), sep=";", skiprows=range(0,3), skipfooter=1, 
                         names=['freq', 'ID', 'date', 'runoff', 'mode', 'confidence'], index_col=2, usecols=range(0,6))
+
 arvan_obs.index =  pd.to_datetime(arvan_obs.index, format='%Y%m%d')
 
-arvan_j2k_and_obs = pd.merge(time_loop, arvan_obs, left_index=True, right_index=True)
+### Fill empty dates with nan
+
+idx = pd.date_range(arvan_obs.index[0], arvan_obs.index[-1])
+
+arvan_obs.index = pd.DatetimeIndex(arvan_obs.index)
+
+arvan_obs = arvan_obs.reindex(idx, fill_value=np.nan)
+
+# We crop both dataframes for the same period
+time_loop = time_loop.loc[arvan_obs.index[0]:arvan_obs.index[-1]]
+arvan_obs = arvan_obs.loc[arvan_obs.index[0]:time_loop.index[-1]]
 
 # Convert sim runoff to L/d
-arvan_j2k_and_obs['catchmentSimRunoff'] = arvan_j2k_and_obs['catchmentSimRunoff']/100000
+time_loop['catchmentSimRunoff'] = time_loop['catchmentSimRunoff']/100000
 
 # Choose subset of dates for plots
-arvan_j2k_and_obs = arvan_j2k_and_obs.loc[arvan_j2k_and_obs.index > '2008-08-01']
+time_loop = time_loop.loc[time_loop.index > '2000-10-01'][1:]
+arvan_obs = arvan_obs.loc[arvan_obs.index > '2000-10-01']
+
+# We load the season MB data for Saint Sorlin glacier
+sorlin_seasonal_mb = pd.read_csv(os.path.join(smb_path, "st_sorlin_seasonal_mb.csv"), sep=";")
+
+sorlin_seasonal_mb['summer L'] = sorlin_seasonal_mb['Summer']*sorlin_seasonal_mb['Surface (m2)']*1000
+sorlin_seasonal_mb['winter L'] = sorlin_seasonal_mb['Winter']*sorlin_seasonal_mb['Surface (m2)']*1000
+
+sorlin_seasonal_mb['annual L'] = sorlin_seasonal_mb['Annual']*sorlin_seasonal_mb['Surface (m2)']*1000
+
+# De-accumulate massBalance and convert it to seasonal and annual series
+j2k_mb_non_cumulative = time_loop['massBalance'].diff()
+
+time_loop['MB_nc'] = j2k_mb_non_cumulative
+time_loop['MB_nc'] = time_loop['MB_nc'].interpolate()
+
+SeasonDict = {11: 'Winter', 12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Winter', 4: 'Summer', 5: 'Summer', 6: 'Summer', 7: 'Summer', \
+8: 'Summer', 9: 'Summer', 10: 'Winter'}
+
+j2k_seasonal_MB = time_loop['MB_nc'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).sum()
+j2k_annual_MB = time_loop['MB_nc'].groupby(time_loop.index.year).sum()
+j2k_annual_MB = j2k_annual_MB.loc[j2k_annual_MB.index > 2000]
+
+years = np.asarray(range(2000, 2013))    
+
+# De-accumulate temperature
+j2k_tmean_non_cumulative = time_loop['tmean'].diff()
+time_loop['tmean_nc'] = j2k_tmean_non_cumulative
+time_loop['tmean_nc'] = time_loop['tmean_nc'].interpolate()
+
+# Calculate seasonal snow and mean temperature
+j2k_seasonal_snow = time_loop['snow'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).sum()
+j2k_seasonal_meanTemp = time_loop['tmean_nc'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).mean()
+
+j2k_annual_snow = time_loop['snow'].groupby(time_loop.index.year).sum()
+j2k_annual_snow = j2k_annual_snow.loc[j2k_annual_snow.index > 2000]
+j2k_annual_meanTemp = time_loop['tmean_nc'].groupby(time_loop.index.year).mean()
+j2k_annual_meanTemp = j2k_annual_meanTemp.loc[j2k_annual_meanTemp.index > 2000]
 
 #import pdb; pdb.set_trace()
 
-####  PLOT J2K VS OBS RUNOFF  #####
+####################################################################################
+####  PLOT J2K VS OBS RUNOFF  ######################################################
+####################################################################################
 
-fig1, axs1 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=10)
+fig1, axs1 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=5)
 
-axs1.plot(arvan_j2k_and_obs.index, arvan_j2k_and_obs['runoff'], linewidth=0.5, c='midnightblue', label="Observations", legend='ul')
-axs1.plot(arvan_j2k_and_obs.index, arvan_j2k_and_obs['catchmentSimRunoff'], linewidth=0.5, c='sienna', label="ALPGM-J2K simulations", legend='ul')
+axs1.plot(time_loop.index, arvan_obs['runoff'], linewidth=0.5, c='midnightblue', label="Observations", legend='ul')
+axs1.plot(time_loop.index, time_loop['catchmentSimRunoff'], linewidth=0.5, c='sienna', label="ALPGM-J2K simulations", legend='ul')
 
 axs1.format(
-#            abc=True, abcloc='ul',
+            abc=True, abcloc='ul',
             ygridminor=True,
             ytickloc='both', yticklabelloc='left',
-            xlabel='Date', ylabel='Runoff (L/d)'
+            xlabel='Date', ylabel='Runoff (L/s)'
             )
 
 fig1.savefig(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'))
+#subprocess.Popen(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'),shell=True)
 
-subprocess.Popen(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'),shell=True)
+######  PLOT DAILY MASS BALANCE  #################
 
-#plt.show()
+fig2, axs2 = plot.subplots(ncols=1, nrows=4, axwidth=4, aspect=3, share=0)
+
+axs2[0].plot(time_loop.index, time_loop['massBalance'], linewidth=1, c='steelblue')
+axs2[0].set_ylabel('m.w.e.')
+axs2[0].format(title='Cumulative daily MB')
+axs2[1].plot(j2k_annual_MB.index, j2k_seasonal_MB['Winter'][1:] + j2k_seasonal_MB['Summer'], linewidth=1, c='steelblue')
+axs2[1].set_ylabel('m.w.e. d$^{-1}$')
+axs2[1].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs2[1].format(title='Annual MB')
+axs2[2].plot(j2k_annual_meanTemp.index, j2k_seasonal_meanTemp['Winter'][1:] + j2k_seasonal_meanTemp['Summer'], linewidth=1, c='darkred')
+axs2[2].set_ylabel('°C')
+axs2[2].format(title='Annual mean temperature')
+axs2[3].plot(j2k_annual_snow.index, j2k_seasonal_snow['Winter'][1:] + j2k_seasonal_snow['Summer'], linewidth=1, c='skyblue')
+axs2[3].set_ylabel('mm')
+axs2[3].format(title='Annual snowfall')
+
+axs2.format(
+#            abc=True, abcloc='ul',
+            ygridminor=True,
+            ytickloc='both', yticklabelloc='left',
+            xlabel='Date'
+            )
+
+fig2.savefig(os.path.join(plots_path, 'arvan_runoff_mb_climate.pdf'))
+#subprocess.Popen(os.path.join(plots_path, 'arvan_runoff_mb_climate.pdf'),shell=True)
+
+######  PLOT SEASONAL MASS BALANCE VALIDATION #################
+
+fig3, axs3 = plot.subplots(ncols=2, nrows=3, aspect=2, axwidth=4, spany=0)
+
+axs3[0].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[0].format(title='Winter MB')
+axs3[0].set_ylabel('m.w.e.')
+axs3[0].plot(sorlin_seasonal_mb['Year'], sorlin_seasonal_mb['winter L'], linewidth=3, c='darkblue', label="GLACIOCLIM winter MB", legend='lr')
+axs3[0].plot(j2k_seasonal_MB['Winter'].index.values, j2k_seasonal_MB['Winter'].values, linewidth=3, c='skyblue', label="J2K winter MB", legend='lr')
+axs3[2].format(title='Winter snowfall')
+axs3[2].set_ylabel('mm')
+axs3[2].plot(j2k_annual_MB.index, j2k_seasonal_snow['Winter'][1:], linewidth=1, c='steelblue')
+axs3[4].format(title='Winter mean temperature')
+axs3[4].set_ylabel('°C')
+axs3[4].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[4].plot(j2k_annual_meanTemp.index, j2k_seasonal_meanTemp['Winter'][1:], linewidth=1, c='darkred')
+
+axs3[1].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[1].format(title='Summer MB')
+axs3[1].set_ylabel('m.w.e.')
+axs3[1].plot(sorlin_seasonal_mb['Year'], sorlin_seasonal_mb['summer L'], linewidth=3, c='darkred', label="GLACIOCLIM summer MB", legend='ur')
+axs3[1].plot(j2k_seasonal_MB['Summer'].index.values, j2k_seasonal_MB['Summer'].values, linewidth=3, c='sienna', label="J2k summer MB", legend='ur')
+axs3[3].format(title='Summer snowfall')
+axs3[3].set_ylabel('mm')
+axs3[3].plot(j2k_annual_MB.index, j2k_seasonal_snow['Summer'], linewidth=1, c='steelblue')
+axs3[5].format(title='Summer mean temperature')
+axs3[5].set_ylabel('°C')
+axs3[5].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[5].plot(j2k_annual_meanTemp.index, j2k_seasonal_meanTemp['Summer'], linewidth=1, c='darkred')
+
+
+
+axs3.format(
+#            abc=True, abcloc='ul',
+            ygridminor=True,
+            ytickloc='both', yticklabelloc='left',
+            xlabel='Date'
+            )
+
+fig3.savefig(os.path.join(plots_path, 'seasonal_mb.pdf'))
+#subprocess.Popen(os.path.join(plots_path, 'seasonal_mb.pdf'),shell=True)
+
+
+#########################################
+
+### ANNUAL MASS BALANCES  #################
+
+#import pdb; pdb.set_trace()
+
+fig4, axs4 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=5)
+
+axs4.axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs4.plot(sorlin_seasonal_mb['Year'].values, sorlin_seasonal_mb['annual L'].values, linewidth=3, c='midnightblue', label="GLACIOCLIM", legend='ul')
+axs4.plot(j2k_annual_MB.index.values, j2k_annual_MB.values, linewidth=3, c='sienna', label="ALPGM-J2K", legend='ul')
+
+axs4.format(
+#            abc=True, abcloc='ul',
+            ygridminor=True,
+            ytickloc='both', yticklabelloc='left',
+            xlabel='Date', ylabel='Glacier-wide mass balance (L)'
+            )
+
+fig4.savefig(os.path.join(plots_path, 'arvan_j2k_vs_GLACIOCLIM_MB.pdf'))
+#subprocess.Popen(os.path.join(plots_path, 'arvan_j2k_vs_GLACIOCLIM_MB.pdf'),shell=True)
+
+fig5, axs5 = plot.subplots(ncols=1, nrows=2, aspect=2, axwidth=5, share=0)
+
+axs5[0].format(title='Daily temperature')
+axs5[0].plot(time_loop.index, time_loop['tmean_nc'], linewidth=1, c='darkred')
+axs5[0].set_ylabel('°C')
+axs5[1].format(title='Daily snowfall')
+axs5[1].plot(time_loop.index, time_loop['snow'], linewidth=1, c='skyblue')
+axs5[1].set_ylabel('mm')
+
+
+axs5.format(
+            abc=True, abcloc='ul',
+            ygridminor=True,
+            ytickloc='both', yticklabelloc='left',
+            xlabel='Date'
+            )
+
+plt.show()
 
