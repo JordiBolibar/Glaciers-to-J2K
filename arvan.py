@@ -116,7 +116,7 @@ j2k_annual_meanTemp = j2k_annual_meanTemp.loc[j2k_annual_meanTemp.index > 2000]
 ####  PLOT J2K VS OBS RUNOFF  ######################################################
 ####################################################################################
 
-fig1, axs1 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=5)
+fig1, axs1 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=8)
 
 axs1.plot(time_loop.index, arvan_obs['runoff'], linewidth=0.5, c='midnightblue', label="Observations", legend='ul')
 axs1.plot(time_loop.index, time_loop['catchmentSimRunoff'], linewidth=0.5, c='sienna', label="ALPGM-J2K simulations", legend='ul')
