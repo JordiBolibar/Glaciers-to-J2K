@@ -82,10 +82,11 @@ sorlin_seasonal_mb['winter L'] = sorlin_seasonal_mb['Winter']*sorlin_seasonal_mb
 sorlin_seasonal_mb['annual L'] = sorlin_seasonal_mb['Annual']*sorlin_seasonal_mb['Surface (m2)']*1000
 
 # De-accumulate massBalance and convert it to seasonal and annual series
-j2k_mb_non_cumulative = time_loop['massBalance'].diff()
+#j2k_mb_non_cumulative = time_loop['massBalance'].diff()
 
-time_loop['MB_nc'] = j2k_mb_non_cumulative
-time_loop['MB_nc'] = time_loop['MB_nc'].interpolate()
+time_loop['MB_nc'] = time_loop['massBalance']
+#time_loop['MB_nc'] = j2k_mb_non_cumulative
+#time_loop['MB_nc'] = time_loop['MB_nc'].interpolate()
 
 SeasonDict = {11: 'Winter', 12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Winter', 4: 'Summer', 5: 'Summer', 6: 'Summer', 7: 'Summer', \
 8: 'Summer', 9: 'Summer', 10: 'Winter'}
@@ -97,16 +98,21 @@ j2k_annual_MB = j2k_annual_MB.loc[j2k_annual_MB.index > 2000]
 years = np.asarray(range(2000, 2013))    
 
 # De-accumulate temperature
-j2k_tmean_non_cumulative = time_loop['tmean'].diff()
-time_loop['tmean_nc'] = j2k_tmean_non_cumulative
-time_loop['tmean_nc'] = time_loop['tmean_nc'].interpolate()
+#j2k_tmean_non_cumulative = time_loop['tmean_glacier'].diff()
+time_loop['tmean_nc'] = time_loop['tmean_glacier']
+
+#time_loop['tmean_nc'] = j2k_tmean_non_cumulative
+#time_loop['tmean_nc'] = time_loop['tmean_nc'].interpolate()
 
 # Calculate seasonal snow and mean temperature
-j2k_seasonal_snow = time_loop['snow'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).sum()
+j2k_seasonal_snow = time_loop['netSnow_glacier'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).sum()
+j2k_seasonal_rain = time_loop['netRain_glacier'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).sum()
 j2k_seasonal_meanTemp = time_loop['tmean_nc'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).mean()
 
-j2k_annual_snow = time_loop['snow'].groupby(time_loop.index.year).sum()
+j2k_annual_snow = time_loop['netSnow_glacier'].groupby(time_loop.index.year).sum()
 j2k_annual_snow = j2k_annual_snow.loc[j2k_annual_snow.index > 2000]
+j2k_annual_rain = time_loop['netRain_glacier'].groupby(time_loop.index.year).sum()
+j2k_annual_rain = j2k_annual_rain.loc[j2k_annual_rain.index > 2000]
 j2k_annual_meanTemp = time_loop['tmean_nc'].groupby(time_loop.index.year).mean()
 j2k_annual_meanTemp = j2k_annual_meanTemp.loc[j2k_annual_meanTemp.index > 2000]
 
@@ -133,19 +139,19 @@ fig1.savefig(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'))
 
 ######  PLOT DAILY MASS BALANCE  #################
 
-fig2, axs2 = plot.subplots(ncols=1, nrows=4, axwidth=4, aspect=3, share=0)
+fig2, axs2 = plot.subplots(ncols=1, nrows=4, axwidth=2, aspect=2, share=0)
 
-axs2[0].plot(time_loop.index, time_loop['massBalance'], linewidth=1, c='steelblue')
+axs2[0].plot(time_loop.index, np.cumsum(time_loop['massBalance'].values), linewidth=1, c='steelblue')
 axs2[0].set_ylabel('m.w.e.')
 axs2[0].format(title='Cumulative daily MB')
 axs2[1].plot(j2k_annual_MB.index, j2k_seasonal_MB['Winter'][1:] + j2k_seasonal_MB['Summer'], linewidth=1, c='steelblue')
 axs2[1].set_ylabel('m.w.e. d$^{-1}$')
 axs2[1].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
 axs2[1].format(title='Annual MB')
-axs2[2].plot(j2k_annual_meanTemp.index, j2k_seasonal_meanTemp['Winter'][1:] + j2k_seasonal_meanTemp['Summer'], linewidth=1, c='darkred')
+axs2[2].plot(j2k_annual_meanTemp.index.values[1:-1], j2k_seasonal_meanTemp['Winter'][2:-1] + j2k_seasonal_meanTemp['Summer'].values[1:-1], linewidth=1, c='darkred')
 axs2[2].set_ylabel('°C')
 axs2[2].format(title='Annual mean temperature')
-axs2[3].plot(j2k_annual_snow.index, j2k_seasonal_snow['Winter'][1:] + j2k_seasonal_snow['Summer'], linewidth=1, c='skyblue')
+axs2[3].plot(j2k_annual_snow.index.values[1:-1], j2k_seasonal_snow['Winter'][2:-1] + j2k_seasonal_snow['Summer'][1:-1], linewidth=1, c='skyblue')
 axs2[3].set_ylabel('mm')
 axs2[3].format(title='Annual snowfall')
 
@@ -161,46 +167,57 @@ fig2.savefig(os.path.join(plots_path, 'arvan_runoff_mb_climate.pdf'))
 
 ######  PLOT SEASONAL MASS BALANCE VALIDATION #################
 
-fig3, axs3 = plot.subplots(ncols=2, nrows=3, aspect=2, axwidth=4, spany=0)
+fig3, axs3 = plot.subplots([[1, 1],[2, 3],[4, 5],[6, 7],[8, 9]], ncols=2, nrows=5, aspect=1, axwidth=4, spany=0)
 
+axs3[0].format(title='Annual glacier-wide MB')
+axs3[0].set_ylabel('L')
 axs3[0].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
-axs3[0].format(title='Winter MB')
-axs3[0].set_ylabel('m.w.e.')
-axs3[0].plot(sorlin_seasonal_mb['Year'], sorlin_seasonal_mb['winter L'], linewidth=3, c='darkblue', label="GLACIOCLIM winter MB", legend='lr')
-axs3[0].plot(j2k_seasonal_MB['Winter'].index.values, j2k_seasonal_MB['Winter'].values, linewidth=3, c='skyblue', label="J2K winter MB", legend='lr')
-axs3[2].format(title='Winter snowfall')
-axs3[2].set_ylabel('mm')
-axs3[2].plot(j2k_annual_MB.index, j2k_seasonal_snow['Winter'][1:], linewidth=1, c='steelblue')
-axs3[4].format(title='Winter mean temperature')
-axs3[4].set_ylabel('°C')
-axs3[4].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
-axs3[4].plot(j2k_annual_meanTemp.index, j2k_seasonal_meanTemp['Winter'][1:], linewidth=1, c='darkred')
+h5 = axs3[0].plot(sorlin_seasonal_mb['Year'].values, sorlin_seasonal_mb['annual L'].values, linewidth=3, c='black', label="GLACIOCLIM annual MB")
+h6 = axs3[0].plot(j2k_annual_MB.index.values[1:-1], j2k_annual_MB.values[1:-1], linewidth=3, c='olive', label="J2K annual MB")
 
 axs3[1].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
-axs3[1].format(title='Summer MB')
-axs3[1].set_ylabel('m.w.e.')
-axs3[1].plot(sorlin_seasonal_mb['Year'], sorlin_seasonal_mb['summer L'], linewidth=3, c='darkred', label="GLACIOCLIM summer MB", legend='ur')
-axs3[1].plot(j2k_seasonal_MB['Summer'].index.values, j2k_seasonal_MB['Summer'].values, linewidth=3, c='sienna', label="J2k summer MB", legend='ur')
-axs3[3].format(title='Summer snowfall')
+axs3[1].format(title='Winter MB')
+axs3[1].set_ylabel('L')
+h1 = axs3[1].plot(sorlin_seasonal_mb['Year'].values[1:-1], sorlin_seasonal_mb['winter L'].values[1:-1], linewidth=3, c='darkblue', label="GLACIOCLIM winter MB")
+h2 = axs3[1].plot(j2k_seasonal_MB['Winter'].index.values[1:-1], j2k_seasonal_MB['Winter'].values[1:-1], linewidth=3, c='skyblue', label="J2K winter MB")
+axs3[3].format(title='Winter snowfall')
 axs3[3].set_ylabel('mm')
-axs3[3].plot(j2k_annual_MB.index, j2k_seasonal_snow['Summer'], linewidth=1, c='steelblue')
-axs3[5].format(title='Summer mean temperature')
-axs3[5].set_ylabel('°C')
-axs3[5].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
-axs3[5].plot(j2k_annual_meanTemp.index, j2k_seasonal_meanTemp['Summer'], linewidth=1, c='darkred')
+axs3[3].plot(j2k_annual_MB.index.values[:-1], j2k_seasonal_snow['Winter'].values[1:-1], linewidth=2, c='skyblue')
+axs3[5].format(title='Winter rainfall')
+axs3[5].set_ylabel('mm')
+axs3[5].plot(j2k_annual_MB.index.values[:-1], j2k_seasonal_rain['Winter'].values[1:-1], linewidth=2, c='steelblue')
+axs3[7].format(title='Winter mean temperature')
+axs3[7].set_ylabel('°C')
+axs3[7].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[7].plot(j2k_annual_meanTemp.index.values[:-1], j2k_seasonal_meanTemp['Winter'].values[1:-1], linewidth=2, c='darkred')
 
+axs3[2].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[2].format(title='Summer MB')
+axs3[2].set_ylabel('L')
+h3 = axs3[2].plot(sorlin_seasonal_mb['Year'].values[1:-1], sorlin_seasonal_mb['summer L'].values[1:-1], linewidth=3, c='darkred', label="GLACIOCLIM summer MB")
+h4 = axs3[2].plot(j2k_seasonal_MB['Summer'].index.values[:-1], j2k_seasonal_MB['Summer'].values[:-1], linewidth=3, c='sienna', label="J2K summer MB")
+axs3[4].format(title='Summer snowfall')
+axs3[4].set_ylabel('mm')
+axs3[4].plot(j2k_annual_MB.index.values[:-1], j2k_seasonal_snow['Summer'].values[:-1], linewidth=2, c='skyblue')
+axs3[6].format(title='Summer rainfall')
+axs3[6].set_ylabel('mm')
+axs3[6].plot(j2k_annual_MB.index.values[:-1], j2k_seasonal_rain['Summer'].values[:-1], linewidth=2, c='steelblue')
+axs3[8].format(title='Summer mean temperature')
+axs3[8].set_ylabel('°C')
+axs3[8].axhline(y=0, color='black', linewidth=0.7, linestyle='-')
+axs3[8].plot(j2k_annual_meanTemp.index.values[:-1], j2k_seasonal_meanTemp['Summer'].values[:-1], linewidth=2, c='darkred')
 
+fig3.legend(((h5,h6,h1,h2,h3,h4)), loc='r', ncols=1, frame=True, labelspacing=3, borderpad=2)
 
 axs3.format(
-#            abc=True, abcloc='ul',
+            abc=True, abcloc='ur',
             ygridminor=True,
             ytickloc='both', yticklabelloc='left',
-            xlabel='Date'
+            xlabel='Year'
             )
 
 fig3.savefig(os.path.join(plots_path, 'seasonal_mb.pdf'))
 #subprocess.Popen(os.path.join(plots_path, 'seasonal_mb.pdf'),shell=True)
-
 
 #########################################
 
@@ -212,7 +229,7 @@ fig4, axs4 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=5)
 
 axs4.axhline(y=0, color='black', linewidth=0.7, linestyle='-')
 axs4.plot(sorlin_seasonal_mb['Year'].values, sorlin_seasonal_mb['annual L'].values, linewidth=3, c='midnightblue', label="GLACIOCLIM", legend='ul')
-axs4.plot(j2k_annual_MB.index.values, j2k_annual_MB.values, linewidth=3, c='sienna', label="ALPGM-J2K", legend='ul')
+axs4.plot(j2k_annual_MB.index.values[1:-1], j2k_annual_MB.values[1:-1], linewidth=3, c='sienna', label="ALPGM-J2K", legend='ul')
 
 axs4.format(
 #            abc=True, abcloc='ul',
