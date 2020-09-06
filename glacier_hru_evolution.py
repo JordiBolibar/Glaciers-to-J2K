@@ -74,7 +74,7 @@ def interpolate_glacier_fractions(hydro_year_range, hru_idx):
     current_HRU_ice_fraction = []
     for day in hydro_year_range:
 #                print(day)
-        if(day < (pd.Timestamp(int(year), 4, 1))):
+        if(day < (pd.Timestamp(int(year), 6, 1))):
             # Same glacierized percentage during accumulation season
             current_HRU_ice_fraction.append(float(raw_HRU_glacier_evolution[-1,hru_idx+1]))
         else:

@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 import proplot as plot
 import copy
+from hydroeval import evaluator, kge, rmse, nse
 
 # Paths
 
@@ -67,9 +68,11 @@ arvan_obs = arvan_obs.reindex(idx, fill_value=np.nan)
 time_loop = time_loop.loc[arvan_obs.index[0]:arvan_obs.index[-1]]
 arvan_obs = arvan_obs.loc[arvan_obs.index[0]:time_loop.index[-1]]
 
-# Convert sim runoff to L/d
+# Convert sim runoff to L/s
 time_loop['catchmentSimRunoff'] = time_loop['catchmentSimRunoff']/86400
 time_loop['glacierRunoff'] = time_loop['glacierRunoff']/86400
+time_loop['iceRunoff'] = time_loop['iceRunoff']/86400
+time_loop['rainRunoff'] = time_loop['rainRunoff']/86400
 
 # Choose subset of dates for plots
 time_loop = time_loop.loc[time_loop.index > '2000-10-01'][1:]
@@ -90,7 +93,7 @@ time_loop['MB_nc'] = time_loop['massBalance']
 #time_loop['MB_nc'] = j2k_mb_non_cumulative
 #time_loop['MB_nc'] = time_loop['MB_nc'].interpolate()
 
-SeasonDict = {11: 'Winter', 12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Winter', 4: 'Summer', 5: 'Summer', 6: 'Summer', 7: 'Summer', \
+SeasonDict = {11: 'Winter', 12: 'Winter', 1: 'Winter', 2: 'Winter', 3: 'Winter', 4: 'Winter', 5: 'Summer', 6: 'Summer', 7: 'Summer', \
 8: 'Summer', 9: 'Summer', 10: 'Winter'}
 
 j2k_seasonal_MB = time_loop['MB_nc'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).sum()
@@ -123,15 +126,40 @@ j2k_annual_meanTemp = j2k_annual_meanTemp.loc[j2k_annual_meanTemp.index > 2000]
 #import pdb; pdb.set_trace()
 
 time_loop['noGlacierRunoff'] = time_loop['catchmentSimRunoff'] - time_loop['glacierRunoff']
+time_loop['netGlacierRunoff'] = time_loop['glacierRunoff'] - time_loop['rainRunoff']
 
 j2k_seasonal_total_runoff = time_loop['catchmentSimRunoff'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).mean()
 j2k_seasonal_noGlacier_runoff = time_loop['noGlacierRunoff'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).mean()
-j2k_seasonal_glacier_runoff = time_loop['glacierRunoff'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).mean()
+j2k_seasonal_glacier_runoff = time_loop['iceRunoff'].groupby([lambda x: SeasonDict[x.month], time_loop.index.year]).mean()
 j2k_seasonal_glacier_contribution = (j2k_seasonal_glacier_runoff/j2k_seasonal_total_runoff)*100
+
+j2K_monthly_obs_runoff = arvan_obs['runoff'].groupby(time_loop.index.month).mean()
+j2K_monthly_total_runoff = time_loop['catchmentSimRunoff'].groupby(time_loop.index.month).mean()
+j2K_monthly_noGlacier_runoff = time_loop['noGlacierRunoff'].groupby(time_loop.index.month).mean()
+
+j2K_daily_ice_contribution = (time_loop['iceRunoff']/time_loop['catchmentSimRunoff'])*100
+j2K_monthly_ice_contribution = j2K_daily_ice_contribution.resample('M').mean()
+j2k_annual_ice_contribution = j2K_daily_ice_contribution.resample('Y').mean()
 
 j2K_daily_glacier_contribution = (time_loop['glacierRunoff']/time_loop['catchmentSimRunoff'])*100
 j2K_monthly_glacier_contribution = j2K_daily_glacier_contribution.resample('M').mean()
 j2k_annual_glacier_contribution = j2K_daily_glacier_contribution.resample('Y').mean()
+
+#############  COMPUTE J2K PERFORMANCE  ##############
+
+### Kling-Gupta Efficiency (objective function 1)
+kge_j2k = evaluator(kge, time_loop['catchmentSimRunoff'].values, arvan_obs['runoff'].values)[0][0]
+kge_j2k_no_glacier = evaluator(kge, time_loop['noGlacierRunoff'].values, arvan_obs['runoff'].values)[0][0]
+
+# Nash-Sutcliffe Efficiency (nse)
+nse_j2k = evaluator(nse, time_loop['catchmentSimRunoff'].values, arvan_obs['runoff'].values)[0]
+nse_j2k_no_glacier = evaluator(nse, time_loop['noGlacierRunoff'].values, arvan_obs['runoff'].values)[0]
+
+print("\nJ2K KGE with glacier: " + str(kge_j2k))
+print("\nJ2K NSE with glacier: " + str(nse_j2k))
+
+print("\nJ2K KGE without glacier: " + str(kge_j2k_no_glacier))
+print("\nJ2K NSE without glacier: " + str(nse_j2k_no_glacier))
 
 #import pdb; pdb.set_trace()
 
@@ -148,8 +176,10 @@ axs1[0].plot(time_loop.index, time_loop['catchmentSimRunoff'], linewidth=0.1, c=
 axs1[1].plot(time_loop.index, time_loop['catchmentSimRunoff'].values - arvan_obs['runoff'].values, linewidth=0.1, c='darkred', label="J2K daily bias", legend='ur')
 #axs1[1].set_ylim(-10000, 10000)
 
-axs1[2].plot(time_loop.index, time_loop['catchmentSimRunoff'].values, linewidth=0.1, c='sienna', label="J2K daily bias", legend='ur')
-axs1[2].plot(time_loop.index, time_loop['glacierRunoff'], linewidth=0.5, c='denim', label="J2K glacier runoff", legend='ur')
+axs1[2].plot(time_loop.index, time_loop['catchmentSimRunoff'].values, linewidth=0.1, c='sienna', label="Observations", legend='ur')
+axs1[2].plot(time_loop.index, time_loop['iceRunoff'], linewidth=0.5, c='denim', label="J2K glacier runoff", legend='ur')
+#axs1[2].plot(time_loop.index, time_loop['rainRunoff'], linewidth=0.1, c='denim', label="J2K rain runoff", legend='ur')
+#axs1[2].plot(time_loop.index, time_loop['iceRunoff'], linewidth=0.1, c='denim', label="J2K ice runoff", legend='ur')
 
 axs1.format(
             abc=True, abcloc='ul',
@@ -297,33 +327,69 @@ fig5.savefig(os.path.join(plots_path, 'arvan_j2K_daily_meteo.pdf'))
 #j2K_daily_glacier_contribution = (time_loop['glacierRunoff']/time_loop['catchmentSimRunoff'])*100
 #j2K_monthly_glacier_contribution = j2K_daily_glacier_contribution.resample('M').mean()
 
-fig6, axs6 = plot.subplots(ncols=1, nrows=3, aspect=3, axwidth=6, spany=0)
+fig6, axs6 = plot.subplots(ncols=1, nrows=2, aspect=2, axwidth=4, spany=0)
 
 axs6.format(
             abc=True, abcloc='ul',
             ygridminor=True,
             ytickloc='both', yticklabelloc='left',
             xlabel='Date',
-            suptitle="Glacier runoff contribution"
+#            suptitle="Glacier runoff contribution"
             )
 
-axs6[0].plot(j2K_daily_glacier_contribution.index, j2K_daily_glacier_contribution.values, linewidth=0.2, c='skyblue')
-axs6[0].set_ylabel('Daily contribution (%)')
+#axs6[0].plot(j2K_daily_glacier_contribution.index, j2K_daily_glacier_contribution.values, linewidth=0.2, c='skyblue')
+#axs6[0].set_ylabel('Daily contribution (%)')
 #axs6[0].set_ylim(0, 15000)
 
-axs6[1].plot(j2K_monthly_glacier_contribution.index, j2K_monthly_glacier_contribution.values, c='skyblue')
-axs6[1].set_ylabel('Monthly contribution (%)')
-#axs6[1].set_ylim(-10000, 10000)
+
+h1 = axs6[0].plot(j2K_monthly_ice_contribution.index, j2K_monthly_ice_contribution.values, c='skyblue', label='Net glacier contribution', legend='t')
+h2 = axs6[0].plot(j2K_monthly_glacier_contribution.index, j2K_monthly_glacier_contribution.values, c='denim', label='Total glacier contribution', legend='t')
+axs6[0].set_ylabel('Monthly contribution (%)')
+axs6[0].set_ylim(0, 100)
 
 #import pdb; pdb.set_trace()
 
-axs6[2].plot(j2k_annual_glacier_contribution.index, j2k_annual_glacier_contribution.values, linewidth=4, color='ocean blue')
-axs6[2].set_ylabel('Annual contribution (%)')
+axs6[1].plot(j2k_annual_ice_contribution.index, j2k_annual_ice_contribution.values, color='skyblue')
+axs6[1].plot(j2k_annual_glacier_contribution.index, j2k_annual_glacier_contribution.values, color='denim')
+axs6[1].set_ylabel('Annual contribution (%)')
+axs6[1].set_ylim(0, 100)
+
+#fig6.legend(((h1,h2)), loc='t', ncols=2, frame=True)
 
 #fig6.savefig(os.path.join(plots_path, 'arvan_j2k_glacier_runoff_contribution.pdf'))
 #subprocess.Popen(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'),shell=
 
 fig6.savefig(os.path.join(plots_path, 'arvan_j2K_glacier_runoff_contribution.pdf'))
+
+#########################################
+
+fig7, axs7 = plot.subplots(ncols=1, nrows=1, aspect=2, axwidth=4)
+
+axs7[0].plot(j2K_monthly_obs_runoff.index, j2K_monthly_obs_runoff.values, linewidth=2, c='black', label="Observations", legend='t')
+axs7[0].plot(j2K_monthly_noGlacier_runoff.index, j2K_monthly_noGlacier_runoff.values, linewidth=2, c='sienna', label="J2K without glacier", legend='t')
+axs7[0].plot(j2K_monthly_total_runoff.index, j2K_monthly_total_runoff.values, linewidth=2, c='denim', label="J2K with glacier", legend='t')
+
+#axs7[0].set_ylim(0, 15000)
+
+#axs7[1].plot(time_loop.index, time_loop['catchmentSimRunoff'].values - arvan_obs['runoff'].values, linewidth=0.1, c='darkred', label="J2K daily bias", legend='ur')
+##axs1[1].set_ylim(-10000, 10000)
+#
+#axs7[2].plot(time_loop.index, time_loop['catchmentSimRunoff'].values, linewidth=0.1, c='sienna', label="Observations", legend='ur')
+#axs7[2].plot(time_loop.index, time_loop['netGlacierRunoff'], linewidth=0.5, c='denim', label="J2K glacier runoff", legend='ur')
+##axs1[2].plot(time_loop.index, time_loop['rainRunoff'], linewidth=0.1, c='denim', label="J2K rain runoff", legend='ur')
+##axs1[2].plot(time_loop.index, time_loop['iceRunoff'], linewidth=0.1, c='denim', label="J2K ice runoff", legend='ur')
+
+axs7.format(
+#            abc=True, abcloc='ul',
+            yticklabelloc='left',
+            xlabel='Month', ylabel='Runoff (L/s)'
+            )
+
+fig1.savefig(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'))
+#subprocess.Popen(os.path.join(plots_path, 'arvan_j2k_vs_obs_runoff.pdf'),shell=True)
+
+
+########################################
 
 plt.show()
 
